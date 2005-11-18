@@ -1,7 +1,7 @@
 schema: xgc2.product.v1
 id: libxgc2-camera-dev
 name: XGC2 Camera Core
-version: 0.1.0-3
+version: 0.1.0-4
 kind: toolchain-apt
 summary: ROS-independent C++14 V4L2 camera capture library, inspection tool, and development
   metadata for XGC2 camera adapters.
@@ -45,6 +45,6 @@ release:
   workflow: release.yml
   ci_workflow: ci.yml
   apt_versions:
-    focal: 0.1.0-3~focal
-    jammy: 0.1.0-3~jammy
-    noble: 0.1.0-3~noble
+    focal: 0.1.0-4~focal
+    jammy: 0.1.0-4~jammy
+    noble: 0.1.0-4~noble
