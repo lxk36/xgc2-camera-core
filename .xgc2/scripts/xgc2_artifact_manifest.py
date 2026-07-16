@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-"""Create a deterministic release-train manifest for locally built debs."""
+"""Create an XGC2 trusted build-artifact manifest for Debian outputs."""
 
 import argparse
 import hashlib
 import json
 import pathlib
 import subprocess
+from datetime import datetime, timezone
 
 
 def deb_field(path: pathlib.Path, field: str) -> str:
@@ -23,46 +24,56 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest(arguments: argparse.Namespace) -> None:
+def build_manifest(arguments: argparse.Namespace) -> pathlib.Path:
     deb_dir = pathlib.Path(arguments.deb_dir)
     output_dir = pathlib.Path(arguments.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    artifacts = []
+    debs = []
     for deb in sorted(deb_dir.glob("*.deb")):
-        artifacts.append(
+        architecture = deb_field(deb, "Architecture")
+        if architecture not in (arguments.architecture, "all"):
+            raise SystemExit(
+                f"artifact architecture mismatch: {deb.name} is {architecture}, "
+                f"expected {arguments.architecture} or all"
+            )
+        debs.append(
             {
-                "filename": deb.name,
-                "sha256": sha256(deb),
-                "size_bytes": deb.stat().st_size,
+                "file": deb.name,
                 "package": deb_field(deb, "Package"),
                 "version": deb_field(deb, "Version"),
-                "architecture": deb_field(deb, "Architecture"),
+                "architecture": architecture,
+                "sha256": sha256(deb),
+                "size": deb.stat().st_size,
             }
         )
-    if not artifacts:
+    if not debs:
         raise SystemExit(f"no .deb artifacts found in {deb_dir}")
 
     manifest = {
-        "schema": "xgc2.artifact-manifest.v1",
+        "schema": "xgc2.build-artifact.v1",
         "product": arguments.product,
-        "product_version": arguments.product_version,
+        "source_sha": arguments.source_sha,
+        "version": arguments.product_version,
         "distribution": arguments.distribution,
         "architecture": arguments.architecture,
-        "source_sha": arguments.source_sha,
         "ci": {
-            "run_id": arguments.ci_run_id,
+            "run_id": str(arguments.ci_run_id),
             "workflow": arguments.ci_workflow,
             "workflow_ref": arguments.ci_workflow_ref,
         },
-        "artifacts": artifacts,
+        "created_at": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "debs": debs,
     }
     destination = output_dir / (
-        f"{arguments.product}-{arguments.distribution}-"
-        f"{arguments.architecture}.json"
+        f"{arguments.product}_{arguments.distribution}_"
+        f"{arguments.architecture}.build.json"
     )
     destination.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    return destination
 
 
 def main() -> None:

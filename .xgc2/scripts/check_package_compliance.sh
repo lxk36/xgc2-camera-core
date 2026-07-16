@@ -6,6 +6,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
 bash -n .xgc2/scripts/*.sh
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/xgc2-camera-core-pycache}"
+python3 -m py_compile \
+  .xgc2/scripts/check_manifest_contract.py \
+  .xgc2/scripts/xgc2_artifact_manifest.py
+python3 .xgc2/scripts/check_manifest_contract.py
 
 generated="$({
   find . \
@@ -29,6 +34,7 @@ required_files=(
   .xgc2/product.yml
   .xgc2/scripts/build_deb.sh
   .xgc2/scripts/check_cpp_quality.sh
+  .xgc2/scripts/check_manifest_contract.py
   .xgc2/scripts/check_package_compliance.sh
   .xgc2/scripts/smoke_test_installed.sh
   .xgc2/scripts/xgc2_artifact_manifest.py
