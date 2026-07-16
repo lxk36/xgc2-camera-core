@@ -1,0 +1,5 @@
+/build/
+/debs/
+/.ci/
+/Testing/
+compile_commands.json

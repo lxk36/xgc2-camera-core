@@ -1,0 +1,43 @@
+schema: xgc2.product.v1
+id: libxgc2-camera-dev
+name: XGC2 Camera Core
+version: 0.1.0-1
+kind: toolchain-apt
+summary: ROS-independent C++14 V4L2 camera capture library, inspection tool,
+  and development metadata for XGC2 camera adapters.
+apt:
+  distribution: focal,jammy,noble
+  install:
+    - libxgc2-camera-dev
+  packages:
+    - libxgc2-camera-dev
+  depends:
+    - libc6
+    - libgcc-s1
+    - libstdc++6
+usage:
+  install: |
+    sudo apt update
+    sudo apt install libxgc2-camera-dev
+  smoke_test: |
+    xgc2-camera-inspect --synthetic --format nv12 --mode multi --capture 2
+  notes: |
+    CMake consumers use find_package(xgc2_camera REQUIRED CONFIG) and link
+    xgc2::camera. This product is intentionally independent of ROS, Catkin,
+    image decoders, simulators, and device-specific platform integrations.
+ownership:
+  paths:
+    - /usr/include/xgc2/camera
+    - /usr/lib/*/libxgc2_camera.so*
+    - /usr/lib/*/cmake/xgc2_camera
+    - /usr/lib/*/pkgconfig/xgc2-camera.pc
+    - /usr/bin/xgc2-camera-inspect
+release:
+  repository: lxk36/xgc2-camera-core
+  ref: main
+  workflow: release.yml
+  ci_workflow: ci.yml
+  apt_versions:
+    focal: 0.1.0-1~focal
+    jammy: 0.1.0-1~jammy
+    noble: 0.1.0-1~noble

@@ -1,0 +1,124 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Expected .xgc2/product.yml version
+        required: true
+        type: string
+      expected_source_sha:
+        description: Expected source commit SHA
+        required: true
+        type: string
+      prepare_action:
+        description: Release-train action
+        required: false
+        default: release
+        type: choice
+        options: [release, compatibility-verify]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  release-guard:
+    runs-on: ubuntu-latest
+    outputs:
+      product_version: ${{ steps.contract.outputs.product_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: contract
+        name: Validate release inputs
+        run: |
+          set -euo pipefail
+          product_version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
+          test "${product_version}" = "${{ inputs.expected_version }}"
+          test "$(git rev-parse HEAD)" = "${{ inputs.expected_source_sha }}"
+          case "${{ inputs.prepare_action }}" in
+            release|compatibility-verify) ;;
+            *) exit 1 ;;
+          esac
+          echo "product_version=${product_version}" >>"${GITHUB_OUTPUT}"
+          ./.xgc2/scripts/check_package_compliance.sh
+
+  deb-build-and-smoke:
+    needs: release-guard
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            image: ubuntu:20.04
+            distribution: focal
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            image: ubuntu:20.04
+            distribution: focal
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            image: ubuntu:22.04
+            distribution: jammy
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            image: ubuntu:22.04
+            distribution: jammy
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            image: ubuntu:24.04
+            distribution: noble
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            image: ubuntu:24.04
+            distribution: noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, install, and smoke-test deb
+        run: |
+          set -euo pipefail
+          install -d .ci/build-manifests
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -e PACKAGE_DISTRIBUTION="${{ matrix.distribution }}" \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            "${{ matrix.image }}" \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential cmake dpkg-dev fakeroot file pkg-config
+              ./.xgc2/scripts/build_deb.sh
+              apt-get install -y ./debs/libxgc2-camera-dev_*.deb
+              ./.xgc2/scripts/smoke_test_installed.sh
+            '
+          python3 .xgc2/scripts/xgc2_artifact_manifest.py build \
+            --deb-dir debs \
+            --output-dir .ci/build-manifests \
+            --product libxgc2-camera-dev \
+            --product-version "${{ needs.release-guard.outputs.product_version }}" \
+            --distribution "${{ matrix.distribution }}" \
+            --architecture "${{ matrix.architecture }}" \
+            --source-sha "${{ inputs.expected_source_sha }}" \
+            --ci-run-id "${GITHUB_RUN_ID}" \
+            --ci-workflow "${GITHUB_WORKFLOW}" \
+            --ci-workflow-ref "${GITHUB_WORKFLOW_REF}"
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.prepare_action == 'release' }}
+        with:
+          name: libxgc2-camera-dev-${{ matrix.distribution }}-${{ matrix.architecture }}
+          path: |
+            debs/*.deb
+            .ci/build-manifests/*.json
+          retention-days: 14
+          include-hidden-files: true
