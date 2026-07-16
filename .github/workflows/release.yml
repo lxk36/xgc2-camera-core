@@ -17,10 +17,34 @@ on:
         default: release
         type: choice
         options: [release, compatibility-verify]
+      apt_overlay_url:
+        description: Optional release-scoped staging APT base URL
+        required: false
+        default: ""
+        type: string
+      dependency_set_digest:
+        description: SHA256 of the resolved release-train dependency set
+        required: false
+        default: ""
+        type: string
+      run_cpp_quality:
+        description: Run C++ quality checks
+        required: true
+        default: false
+        type: boolean
+      run_source_tests:
+        description: Run source tests
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   actions: read
   contents: read
+
+env:
+  XGC2_APT_OVERLAY_URL: ${{ inputs.apt_overlay_url }}
+  XGC2_DEPENDENCY_SET_DIGEST: ${{ inputs.dependency_set_digest }}
 
 jobs:
   release-guard:
@@ -31,6 +55,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: contract
         name: Validate release inputs
+        env:
+          APT_OVERLAY_URL: ${{ inputs.apt_overlay_url }}
+          DEPENDENCY_SET_DIGEST: ${{ inputs.dependency_set_digest }}
         run: |
           set -euo pipefail
           product_version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
@@ -40,8 +67,62 @@ jobs:
             release|compatibility-verify) ;;
             *) exit 1 ;;
           esac
+          if [[ -n "${DEPENDENCY_SET_DIGEST}" &&
+                ! "${DEPENDENCY_SET_DIGEST}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "dependency_set_digest must be empty or 64 lowercase hex characters" >&2
+            exit 1
+          fi
+          if [[ -n "${APT_OVERLAY_URL}" && -z "${DEPENDENCY_SET_DIGEST}" ]]; then
+            echo "apt_overlay_url requires a dependency_set_digest" >&2
+            exit 1
+          fi
           echo "product_version=${product_version}" >>"${GITHUB_OUTPUT}"
           ./.xgc2/scripts/check_package_compliance.sh
+
+  cpp-quality:
+    if: ${{ inputs.run_cpp_quality }}
+    needs: release-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run C++ quality checks in Ubuntu Focal
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            ubuntu:20.04 \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential clang-format cmake cppcheck
+              ./.xgc2/scripts/check_cpp_quality.sh
+            '
+
+  source-tests:
+    if: ${{ inputs.run_source_tests }}
+    needs: release-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run source tests in Ubuntu Focal
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            ubuntu:20.04 \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends build-essential cmake
+              cmake -S . -B .ci/source-tests -DCMAKE_BUILD_TYPE=RelWithDebInfo
+              cmake --build .ci/source-tests -- -j"$(nproc)"
+              (cd .ci/source-tests && ctest --output-on-failure)
+            '
 
   deb-build-and-smoke:
     needs: release-guard
@@ -89,6 +170,7 @@ jobs:
           docker run --rm \
             --platform "${{ matrix.platform }}" \
             -e PACKAGE_DISTRIBUTION="${{ matrix.distribution }}" \
+            -e XGC2_APT_OVERLAY_URL="${XGC2_APT_OVERLAY_URL}" \
             -v "${GITHUB_WORKSPACE}:/work" \
             -w /work \
             "${{ matrix.image }}" \
